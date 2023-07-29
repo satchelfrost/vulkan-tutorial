@@ -12,7 +12,7 @@ void VulkanApp::initWindow() {
   glfwInit();
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  window_ = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+  window_ = glfwCreateWindow(width, height, "Vulkan", nullptr, nullptr);
 }
 
 void VulkanApp::initVulkan() {
@@ -21,9 +21,16 @@ void VulkanApp::initVulkan() {
   createSurface();
   pickPhysicalDevice();
   createLogicalDevice();
+  retrieveQueues();
+  createSwapChain();
+  retrieveSwapChainImages();
+  createImageViews();
 }
 
 void VulkanApp::cleanup() {
+  for (auto imageView : swapChainImageViews_)
+    vkDestroyImageView(device_, imageView, nullptr);
+  vkDestroySwapchainKHR(device_, swapChain_, nullptr);
   vkDestroyDevice(device_, nullptr);
   if (enableValidationLayers_) {
     DestroyDebugUtilsMessengerEXT(instance_, debugMessenger_, nullptr);
@@ -85,7 +92,7 @@ void VulkanApp::createVulkanInstance() {
     BeginningOfMsg("Instance Validation Log");
 
   VkResult result = vkCreateInstance(&createInfo, nullptr, &instance_);
-  successCheck(result, "Failed to create instance!");
+  successCheck(result, "Failed to create instance");
 
   if (enableValidationLayers_)
     EndOfMsg("Instance Validation Log");
@@ -192,13 +199,90 @@ void VulkanApp::createLogicalDevice() {
 
   VkResult result = vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_);
   successCheck(result, "Failed to create logical device");
-
-  // Get queues here?
-  vkGetDeviceQueue(device_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
-  vkGetDeviceQueue(device_, indices.presentFamily.value(), 0, &presentQueue_);
 }
 
 void VulkanApp::createSurface() {
   VkResult result = glfwCreateWindowSurface(instance_, window_, nullptr, &surface_);
   successCheck(result, "Failed to create window surface");
+}
+
+void VulkanApp::createSwapChain() {
+  SwapChainSupportDetails details = querySwapChainSupport(physicalDevice_, surface_);
+  VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(details.formats);
+  VkPresentModeKHR presentMode = chooseSwapPresentMode(details.presentModes);
+  swapChainExtent_ = chooseSwapExtent(details.capabilities, window_);
+  swapChainImageFormat_ = surfaceFormat.format;
+
+  // Recommended to request at least one more image than minimum in case of waiting to acquire another image
+  uint32_t imageCount = details.capabilities.minImageCount + 1;
+
+  if (details.capabilities.maxImageCount > 0 && imageCount > details.capabilities.maxImageCount)
+    imageCount = details.capabilities.maxImageCount;
+
+  // Create the swap chain
+  VkSwapchainCreateInfoKHR createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+  createInfo.surface = surface_;
+  createInfo.minImageCount = imageCount;
+  createInfo.imageFormat = surfaceFormat.format;
+  createInfo.imageExtent = swapChainExtent_;
+  createInfo.imageArrayLayers = 1;
+  createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+  QueueFamilyIndices indices = findQueueFamilies(physicalDevice_, surface_);
+  uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+  if (indices.graphicsFamily != indices.presentFamily) {
+    createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+    createInfo.queueFamilyIndexCount = 2;
+    createInfo.pQueueFamilyIndices = queueFamilyIndices;
+  } else {
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.queueFamilyIndexCount = 0;
+    createInfo.pQueueFamilyIndices = nullptr;
+  }
+
+  createInfo.preTransform = details.capabilities.currentTransform;
+  createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  createInfo.presentMode = presentMode;
+  createInfo.clipped = VK_TRUE;
+  createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+  VkResult result = vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapChain_);
+  successCheck(result, "Failed to create swap chain");
+}
+
+void VulkanApp::retrieveQueues() {
+  QueueFamilyIndices indices = findQueueFamilies(physicalDevice_, surface_);
+  vkGetDeviceQueue(device_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
+  vkGetDeviceQueue(device_, indices.presentFamily.value(), 0, &presentQueue_);
+}
+
+void VulkanApp::retrieveSwapChainImages() {
+  uint32_t imageCount = 0;
+  vkGetSwapchainImagesKHR(device_, swapChain_, &imageCount, nullptr);
+  swapChainImages_.resize(imageCount);
+  vkGetSwapchainImagesKHR(device_, swapChain_, &imageCount, swapChainImages_.data());
+}
+
+void VulkanApp::createImageViews() {
+  swapChainImageViews_.resize(swapChainImages_.size());
+  for (size_t i = 0; i < swapChainImages_.size(); i++) {
+    VkImageViewCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.image = swapChainImages_[i];
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    createInfo.format = swapChainImageFormat_;
+    createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.baseArrayLayer = 0;
+    createInfo.subresourceRange.layerCount = 1;
+
+    VkResult result = vkCreateImageView(device_, &createInfo, nullptr, &swapChainImageViews_[i]);
+    successCheck(result, "Failed to create image views");
+  }
 }
