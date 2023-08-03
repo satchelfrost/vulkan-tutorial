@@ -26,10 +26,18 @@ void VulkanApp::initVulkan() {
   retrieveSwapChainImages();
   createImageViews();
   createRenderPass();
+  createGraphicsPipelineLayout();
   createGraphicsPipeline();
+  createFrameBuffers();
+  createCommandPool();
+  createCommandBuffer();
 }
 
 void VulkanApp::cleanup() {
+  vkDestroyCommandPool(device_, commandPool_, nullptr);
+  for (auto framebuffer : swapChainFramebuffers_)
+    vkDestroyFramebuffer(device_, framebuffer, nullptr);
+  vkDestroyPipeline(device_, pipeline_, nullptr);
   vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
   vkDestroyRenderPass(device_, renderPass_, nullptr);
   for (auto imageView : swapChainImageViews_)
@@ -313,7 +321,7 @@ void VulkanApp::createGraphicsPipeline() {
 
   // Dynamic states
   std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-  VkPipelineDynamicStateCreateInfo dynamicState;
+  VkPipelineDynamicStateCreateInfo dynamicState{};
   dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
   dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
   dynamicState.pDynamicStates = dynamicStates.data();
@@ -396,10 +404,7 @@ void VulkanApp::createGraphicsPipeline() {
   colorBlending.blendConstants[2] = 0.0f;
   colorBlending.blendConstants[3] = 0.0f;
 
-
-  // Create pipeline layout
-  createGraphicsPipelineLayout();
-
+  // Create the pipeline
   VkGraphicsPipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipelineInfo.stageCount = 2;
@@ -416,6 +421,9 @@ void VulkanApp::createGraphicsPipeline() {
   pipelineInfo.renderPass = renderPass_;
   pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
   pipelineInfo.basePipelineIndex = -1;
+
+  VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline_);
+  successCheck(result, "Failed to create graphics pipeline");
 
   // Destroy shader modules
   vkDestroyShaderModule(device_, vertShaderModule, nullptr);
@@ -463,4 +471,45 @@ void VulkanApp::createRenderPass() {
 
   VkResult result = vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass_);
   successCheck(result, "Failed to create render pass");
+}
+
+void VulkanApp::createFrameBuffers() {
+  swapChainFramebuffers_.resize(swapChainImageViews_.size());
+  for (size_t i = 0; i < swapChainImageViews_.size(); i++) {
+    VkImageView attachments[] = {swapChainImageViews_[i]};
+
+    VkFramebufferCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    createInfo.renderPass = renderPass_;
+    createInfo.attachmentCount = 1;
+    createInfo.pAttachments = attachments;
+    createInfo.width = swapChainExtent_.width;
+    createInfo.height = swapChainExtent_.height;
+    createInfo.layers = 1;
+
+    VkResult result = vkCreateFramebuffer(device_, &createInfo, nullptr, &swapChainFramebuffers_[i]);
+    successCheck(result, "Failed to create framebuffer");
+  }
+}
+
+void VulkanApp::createCommandPool() {
+  QueueFamilyIndices indices = findQueueFamilies(physicalDevice_, surface_);
+  VkCommandPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  poolInfo.queueFamilyIndex = indices.graphicsFamily.value();
+
+  VkResult result = vkCreateCommandPool(device_, &poolInfo, nullptr, &commandPool_);
+  successCheck(result, "Failed to create command pool");
+}
+
+void VulkanApp::createCommandBuffer() {
+  VkCommandBufferAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = commandPool_;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = 1;
+
+  VkResult result = vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer_);
+  successCheck(result, "Failed to allocate command buffers");
 }

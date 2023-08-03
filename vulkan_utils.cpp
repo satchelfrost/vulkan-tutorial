@@ -228,3 +228,53 @@ VkShaderModule createShaderModule(const std::vector<char>& code, VkDevice device
 
   return shaderModule;
 }
+
+void recordCommandBuffer(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkExtent2D extent,
+                         VkRenderPass renderPass, VkPipeline pipeline) {
+  VkCommandBufferBeginInfo info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  info.flags = 0;
+  info.pInheritanceInfo = nullptr;
+
+  VkResult result = vkBeginCommandBuffer(commandBuffer, &info);
+  successCheck(result, "Failed to begin recording command buffer");
+
+  VkRenderPassBeginInfo renderPassInfo{};
+  renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  renderPassInfo.renderPass = renderPass;
+  renderPassInfo.framebuffer = framebuffer;
+  renderPassInfo.renderArea.offset = {0, 0};
+  renderPassInfo.renderArea.extent = extent;
+
+  VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+  renderPassInfo.clearValueCount = 1;
+  renderPassInfo.pClearValues = &clearColor;
+
+  // Begin render pass
+  vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  // Bind command buffer to pipeline
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+  // Dynamic command specification
+  VkViewport viewport{};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = static_cast<float>(extent.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+  VkRect2D scissor{};
+  scissor.offset = {0, 0};
+  scissor.extent = extent;
+  vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+  // Draw
+  vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+  // End render pass
+  vkCmdEndRenderPass(commandBuffer);
+
+  result = vkEndCommandBuffer(commandBuffer);
+  successCheck(result, "Failed to record command buffer");
+}

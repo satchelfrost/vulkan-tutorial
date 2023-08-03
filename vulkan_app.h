@@ -28,6 +28,10 @@ private:
   std::vector<VkImageView> swapChainImageViews_;
   VkRenderPass renderPass_;
   VkPipelineLayout pipelineLayout_;
+  VkPipeline pipeline_;
+  std::vector<VkFramebuffer> swapChainFramebuffers_;
+  VkCommandPool commandPool_;
+  VkCommandBuffer commandBuffer_;
 
 public:
   void run();
@@ -53,4 +57,7 @@ private:
   void createGraphicsPipelineLayout();
   void createRenderPass();
   void createGraphicsPipeline();
+  void createFrameBuffers();
+  void createCommandPool();
+  void createCommandBuffer();
 };
