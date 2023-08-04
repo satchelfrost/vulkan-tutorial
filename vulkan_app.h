@@ -32,6 +32,9 @@ private:
   std::vector<VkFramebuffer> swapChainFramebuffers_;
   VkCommandPool commandPool_;
   VkCommandBuffer commandBuffer_;
+  VkSemaphore imageAvailableSemaphore_;
+  VkSemaphore renderFinishedSemaphore_;
+  VkFence inFlightFence_;
 
 public:
   void run();
@@ -60,4 +63,6 @@ private:
   void createFrameBuffers();
   void createCommandPool();
   void createCommandBuffer();
+  void drawFrame();
+  void createSyncObjects();
 };

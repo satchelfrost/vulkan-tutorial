@@ -31,9 +31,13 @@ void VulkanApp::initVulkan() {
   createFrameBuffers();
   createCommandPool();
   createCommandBuffer();
+  createSyncObjects();
 }
 
 void VulkanApp::cleanup() {
+  vkDestroySemaphore(device_, imageAvailableSemaphore_, nullptr);
+  vkDestroySemaphore(device_, renderFinishedSemaphore_, nullptr);
+  vkDestroyFence(device_, inFlightFence_, nullptr);
   vkDestroyCommandPool(device_, commandPool_, nullptr);
   for (auto framebuffer : swapChainFramebuffers_)
     vkDestroyFramebuffer(device_, framebuffer, nullptr);
@@ -162,8 +166,12 @@ void VulkanApp::setupDebugMessenger() {
 }
 
 void VulkanApp::mainLoop() {
-  while (!glfwWindowShouldClose(window_))
+  while (!glfwWindowShouldClose(window_)) {
     glfwPollEvents();
+    drawFrame();
+  }
+
+  vkDeviceWaitIdle(device_);
 }
 
 void VulkanApp::pickPhysicalDevice() {
@@ -462,12 +470,22 @@ void VulkanApp::createRenderPass() {
   subpass.colorAttachmentCount = 1;
   subpass.pColorAttachments = &colorAttachmentRef;
 
+  VkSubpassDependency dependency{};
+  dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dependency.dstSubpass = 0;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependency.srcAccessMask = 0;
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
   VkRenderPassCreateInfo renderPassInfo{};
   renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
   renderPassInfo.attachmentCount = 1;
   renderPassInfo.pAttachments = &colorAttachment;
   renderPassInfo.subpassCount = 1;
   renderPassInfo.pSubpasses = &subpass;
+  renderPassInfo.dependencyCount = 1;
+  renderPassInfo.pDependencies = &dependency;
 
   VkResult result = vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass_);
   successCheck(result, "Failed to create render pass");
@@ -512,4 +530,55 @@ void VulkanApp::createCommandBuffer() {
 
   VkResult result = vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer_);
   successCheck(result, "Failed to allocate command buffers");
+}
+
+void VulkanApp::drawFrame() {
+  vkWaitForFences(device_, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+  vkResetFences(device_, 1, &inFlightFence_);
+
+  uint32_t imageIndex;
+  vkAcquireNextImageKHR(device_, swapChain_, UINT64_MAX, imageAvailableSemaphore_, VK_NULL_HANDLE, &imageIndex);
+
+  vkResetCommandBuffer(commandBuffer_, 0);
+  VkFramebuffer framebuffer = swapChainFramebuffers_[imageIndex];
+  recordCommandBuffer(commandBuffer_, framebuffer, swapChainExtent_, renderPass_, pipeline_); 
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.waitSemaphoreCount = 1;
+  submitInfo.pWaitSemaphores = &imageAvailableSemaphore_; // TEST
+  VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  submitInfo.pWaitDstStageMask = &waitStage; // TEST
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer_;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &renderFinishedSemaphore_; // TEST
+
+  VkResult result = vkQueueSubmit(graphicsQueue_, 1, &submitInfo, inFlightFence_);
+  successCheck(result, "Failed to submit draw command buffer");
+
+  VkPresentInfoKHR presentInfo{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &renderFinishedSemaphore_; // TEST
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = &swapChain_; // TEST
+  presentInfo.pImageIndices = &imageIndex;
+  presentInfo.pResults = nullptr;
+
+  vkQueuePresentKHR(presentQueue_, &presentInfo);
+}
+
+void VulkanApp::createSyncObjects() {
+  VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  VkResult result = vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &imageAvailableSemaphore_);
+  successCheck(result, "Failed to create imave available semaphore");
+  result = vkCreateSemaphore(device_, &semaphoreInfo, nullptr, &renderFinishedSemaphore_);
+  successCheck(result, "Failed to create render finsihed semaphore");
+
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+
+  // Set this flag so that the fence will not block on the first call to drawFrame()
+  fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+  result = vkCreateFence(device_, &fenceInfo, nullptr, &inFlightFence_);
+  successCheck(result, "Failed to create in flight fence");
 }
